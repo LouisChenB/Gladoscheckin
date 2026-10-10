@@ -3,6 +3,53 @@ import json
 import os
 import sys
 
+# 已验证的服务端设备名称；只有明确返回设备不匹配时才采用此映射。
+DEVICE_USER_AGENTS = {
+    "macOS": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+    ),
+    "Windows": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+    ),
+    "Android": (
+        "Mozilla/5.0 (Linux; Android 16; Pixel 10) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36"
+    ),
+}
+
+
+def checkin_with_device(url, headers, payload):
+    """按服务端返回的登录设备重试一次，并返回本账号最终使用的 User-Agent。"""
+    headers = dict(headers)
+    response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
+    useragent = headers["user-agent"]
+    if response.status_code != 200:
+        return response, useragent
+
+    result = response.json()
+    if not isinstance(result, dict) or result.get("reason") != "device-mismatch":
+        return response, useragent
+
+    login_device = result.get("loginDevice")
+    matched_agent = DEVICE_USER_AGENTS.get(login_device) if isinstance(login_device, str) else None
+    if not matched_agent:
+        print(f"无法自动匹配登录设备 {login_device!r}，请配置 USER_AGENT 或重新登录。")
+        return response, useragent
+    if matched_agent == useragent:
+        print(f"已使用 {login_device} 设备配置，服务端仍拒绝，请重新登录更新 Cookie。")
+        return response, useragent
+
+    print(
+        f"设备不匹配: 登录设备={login_device}, "
+        f"请求设备={result.get('currentDevice', '未知')}；自动切换并重试一次。"
+    )
+    headers["user-agent"] = matched_agent
+    response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
+    return response, matched_agent
+
+
 # -------------------------------------------------------------------------------------------
 # github workflows
 # -------------------------------------------------------------------------------------------
@@ -33,16 +80,14 @@ if __name__ == "__main__":
 
     referer = "https://glados.cloud/console/checkin"
     origin = "https://glados.cloud"
-    # 必须与获取 Cookie 时的登录设备一致；当前账号在 macOS Chrome 登录。
-    useragent = os.environ.get("USER_AGENT", "").strip() or (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-    )
+    # USER_AGENT 只作为各账号的初始值；设备不匹配时按账号独立调整。
+    initial_useragent = os.environ.get("USER_AGENT", "").strip() or DEVICE_USER_AGENTS["macOS"]
     payload = {"token": "glados.cloud"}
 
     for account_index, cookie in enumerate(cookies, start=1):
         print(f"处理账号 {account_index}/{len(cookies)}")
-        checkin = requests.post(
+        useragent = initial_useragent
+        checkin, useragent = checkin_with_device(
             url,
             headers={
                 "cookie": cookie,
@@ -51,7 +96,7 @@ if __name__ == "__main__":
                 "user-agent": useragent,
                 "content-type": "application/json;charset=UTF-8",
             },
-            data=json.dumps(payload),
+            payload=payload,
         )
         state = requests.get(
             url2,

@@ -48,13 +48,16 @@
 
 #### 可选：USER_AGENT（登录设备一致性）
 
-从获取 Cookie 的同一个浏览器请求中复制 `User-Agent`，保存为 `USER_AGENT` Secret。
-未配置时使用 macOS Chrome；如果在 Windows、Android 或其他设备登录，请务必配置。
-多账号共用此配置，请在同一设备类型的独立浏览器/个人资料中分别登录并获取 Cookie。
+脚本会为每个账号独立匹配登录设备。默认先使用 macOS Chrome；如果接口明确返回
+`reason: device-mismatch`，就根据 `loginDevice` 切换对应的 User-Agent，并且只重试一次。
+目前支持 macOS、Windows、Android。重试后，该账号的状态、积分和兑换请求沿用匹配后的设备；
+下一个账号重新从初始配置开始，不会继承前一个账号的设备。
 
-如果签到返回 `reason: device-mismatch`，表示登录设备与请求设备不一致。
-关闭开发者工具中的手机模拟，使用真实登录设备的 User-Agent；必要时重新登录并更新完整 Cookie。
-脚本会输出登录设备和请求设备，不再打印完整账号状态或 Cookie 片段。
+不同设备获取的完整 Cookie 仍可直接用 `&` 连接，无需逐个配置设备。
+若希望指定初始设备，可从登录浏览器请求中复制 `User-Agent`，保存为 `USER_AGENT` Secret。
+对于 Cookie 失效、未知设备或重试后仍失败的情况，脚本会报告错误，不会反复重试。
+必要时关闭浏览器的手机模拟，重新登录并更新完整 Cookie。
+脚本只输出设备诊断，不打印完整账号状态或 Cookie 片段。
 
 `code: 1` 且提示 `Today's observation logged. Return tomorrow for more points.` 表示今日已签到。
 签到或账号状态查询失败时，脚本会在处理完账号后以非零状态退出，使 Actions 显示失败。
