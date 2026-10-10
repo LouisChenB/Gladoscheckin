@@ -42,6 +42,7 @@ jobs:
       env:
         PUSHPLUS: ${{ secrets.PUSHPLUS }}
         COOKIES: ${{ secrets.COOKIES }}
+        USER_AGENT: ${{ secrets.USER_AGENT }}
 
     - name: keep alive
       uses: liskin/gh-workflow-keepalive@v1

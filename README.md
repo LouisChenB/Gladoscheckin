@@ -38,13 +38,26 @@
 
 ![图片加载失败](imgs/2.png)
 
-4. 点击任意请求，在 `Request Headers` 下找到 `Cookie`，复制其值
+4. 点击发往 `glados.cloud` 的请求，在 `Request Headers` 下找到 `Cookie`，复制完整值（包括存在的 `gld:sess`、`gld:sess.sig`，不要只复制 `koa:sess`）。
 
 > 参考格式：`koa:sess=eyJ1c2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxAwMH0=; koa:sess.sig=xJkOxxxxxxxxxxxxxxxtnM;`
 
 ![图片加载失败](imgs/3.png)
 
 **多账号**：在 `COOKIES` 中用 `&` 连接多个 cookie（例如：`cookie1&cookie2&cookie3`）
+
+#### 可选：USER_AGENT（登录设备一致性）
+
+从获取 Cookie 的同一个浏览器请求中复制 `User-Agent`，保存为 `USER_AGENT` Secret。
+未配置时使用 macOS Chrome；如果在 Windows、Android 或其他设备登录，请务必配置。
+多账号共用此配置，请在同一设备类型的独立浏览器/个人资料中分别登录并获取 Cookie。
+
+如果签到返回 `reason: device-mismatch`，表示登录设备与请求设备不一致。
+关闭开发者工具中的手机模拟，使用真实登录设备的 User-Agent；必要时重新登录并更新完整 Cookie。
+脚本会输出登录设备和请求设备，不再打印完整账号状态或 Cookie 片段。
+
+`code: 1` 且提示 `Today's observation logged. Return tomorrow for more points.` 表示今日已签到。
+签到或账号状态查询失败时，脚本会在处理完账号后以非零状态退出，使 Actions 显示失败。
 
 #### 可选：PUSHPLUS（微信推送）
 

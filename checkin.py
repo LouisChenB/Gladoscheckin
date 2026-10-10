@@ -1,6 +1,7 @@
 import requests
 import json
 import os
+import sys
 
 # -------------------------------------------------------------------------------------------
 # github workflows
@@ -15,11 +16,10 @@ if __name__ == "__main__":
     sendContent = ""
 
     # glados账号cookie 直接使用数组 如果使用环境变量需要字符串分割一下
-    cookies = os.environ.get("COOKIES", []).split("&")
-    if cookies[0] == "":
+    cookies = [value.strip() for value in os.environ.get("COOKIES", "").split("&") if value.strip()]
+    if not cookies:
         print("未获取到COOKIE变量")
-        cookies = []
-        exit(0)
+        sys.exit(1)
 
     url = "https://glados.cloud/api/user/checkin"
     url2 = "https://glados.cloud/api/user/status"
@@ -33,10 +33,15 @@ if __name__ == "__main__":
 
     referer = "https://glados.cloud/console/checkin"
     origin = "https://glados.cloud"
-    useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36"
+    # 必须与获取 Cookie 时的登录设备一致；当前账号在 macOS Chrome 登录。
+    useragent = os.environ.get("USER_AGENT", "").strip() or (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+    )
     payload = {"token": "glados.cloud"}
 
-    for cookie in cookies:
+    for account_index, cookie in enumerate(cookies, start=1):
+        print(f"处理账号 {account_index}/{len(cookies)}")
         checkin = requests.post(
             url,
             headers={
@@ -70,27 +75,67 @@ if __name__ == "__main__":
         # --------------------------------------------------------------------------------------------------------#
         if checkin.status_code == 200:
             # 解析返回的json数据
-            result = checkin.json()
-            # 获取签到结果
-            status = result.get("message")
-            print(status)
+            checkin_result = checkin.json()
+            status = checkin_result.get("message") or ""
+            checkin_code = checkin_result.get("code")
+            reason = checkin_result.get("reason")
+            print(f"签到响应: code={checkin_code}, reason={reason}, message={status}")
+            if reason == "device-mismatch":
+                print(
+                    f"登录设备={checkin_result.get('loginDevice', '未知')}, "
+                    f"请求设备={checkin_result.get('currentDevice', '未知')}；"
+                    "请使用登录浏览器的 User-Agent，必要时重新登录。"
+                )
 
             # 获取账号当前状态
             result = state.json()
-            print(result)
+
+            if result.get("code") != 0 or not isinstance(result.get("data"), dict):
+                print(f"⚠️ 获取账号状态失败: {result.get('message', '未知错误')}，Cookie 可能已过期，请重新获取")
+                fail += 1
+                email = f"账号 {account_index}"
+                message_status = f"账号状态查询失败: {result.get('message', '未知错误')}"
+                message_days = "无法获取"
+                message_points = "无法获取"
+                message_exchange = ""
+
+                exchange_line = ""
+                sendContent += f"{'-'*30}\n\
+            账号: {email}\n\
+            签到情况: {message_status}\n\
+            剩余天数: {message_days}\n\
+            当前积分: {message_points}\n"
+
+                if cookie == cookies[-1]:
+                    sendContent += "-" * 30
+                continue
+
             # 获取剩余时间
             leftdays = int(float(result["data"]["leftDays"]))
             # 获取账号email
             email = result["data"]["email"]
 
-            if "Checkin!" in status:
+            status_lower = (status or "").lower()
+            if reason == "device-mismatch" or checkin_code == 4:
+                fail += 1
+                message_status = (
+                    f"签到被拒绝: {status} "
+                    f"(登录设备={checkin_result.get('loginDevice', '未知')}, "
+                    f"请求设备={checkin_result.get('currentDevice', '未知')})"
+                )
+            elif checkin_code in (None, 1) and (
+                "repeat" in status_lower or "already" in status_lower
+                or "today's observation logged" in status_lower
+            ):
+                message_status = "今日已签到"
+            elif checkin_code == 0 or (checkin_code is None and (
+                "checkin!" in status_lower or "checkin success" in status_lower
+            )):
                 success += 1
                 message_status = "签到成功"
-            elif status == "Checkin Repeats! Please Try Tomorrow":
-                message_status = "今日已签到"
             else:
                 fail += 1
-                message_status = "签到失败，请检查..."
+                message_status = f"签到失败 (code={checkin_code}, API返回: {status})"
 
             if leftdays is not None:
                 message_days = f"{leftdays} 天"
@@ -134,8 +179,9 @@ if __name__ == "__main__":
                             f"❌ 兑换请求失败 (HTTP {exchange_resp.status_code})"
                         )
         else:
-            email = ""
-            message_status = "签到请求url失败, 请检查..."
+            fail += 1
+            email = f"账号 {account_index}"
+            message_status = f"签到请求失败 (HTTP {checkin.status_code})"
             message_days = "获取信息失败"
             message_points = "获取信息失败"
             message_exchange = ""
@@ -160,3 +206,6 @@ if __name__ == "__main__":
         plusurl = f"http://www.pushplus.plus/send?token={sckey}&title={title}&content={sendContent}"
         r = requests.get(plusurl)
         print(r.status_code)
+
+    # 处理完全部账号并推送后，让 Actions 正确反映业务失败。
+    sys.exit(1 if fail else 0)
